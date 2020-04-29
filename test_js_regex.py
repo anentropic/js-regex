@@ -49,7 +49,7 @@ def test_expected_transforms(pattern, good_match, bad_match):
 def test_charclass_transforms(pattern, good_match, bad_match):
     regex = js_regex.compile(pattern)
     assert regex.search(good_match)
-    assert not regex.search(bad_match)
+    assert regex.search(bad_match) is None
     if ord(bad_match) >= 128:
         # Non-ascii string is matched by Python 3, but not in JS mode
         assert re.compile(pattern).search(bad_match)

@@ -2,6 +2,7 @@
 from __future__ import unicode_literals
 
 import re
+import sre_compile
 import sre_constants
 import sre_parse
 from sys import version_info as python_version
@@ -21,6 +22,34 @@ class NotJavascriptRegex(ValueError):
 
 if python_version.major < 3:  # pragma: no cover  # Awful Python 2 compat hack.
     exec("chr = unichr")  # nosec
+
+
+def ast_sub_in(subpattern, target, *replacements):
+    """
+    in-place substitution for an IN clause member (i.e. character class)
+    """
+    for i, el in enumerate(subpattern):
+        if isinstance(el, tuple) and el[0] is sre_parse.IN:
+            assert isinstance(subpattern, sre_parse.SubPattern)
+            in_list = el[1]
+            for i, el in enumerate(in_list):
+                if el == target:
+                    in_list.pop(i)
+                    for repl in reversed(replacements):
+                        in_list.insert(i, repl)
+        elif isinstance(el, (list, tuple, sre_parse.SubPattern)):
+            ast_sub_in(el, target, *replacements)
+
+
+def ast_sub_el(subpattern, target, replacement):
+    """
+    in-place substitution for a single SubPattern member
+    """
+    for i, el in enumerate(subpattern):
+        if el == target:
+            subpattern[i] = replacement
+        elif isinstance(el, (list, tuple, sre_parse.SubPattern)):
+            ast_sub_el(el, target, replacement)
 
 
 @lru_cache(maxsize=512)  # Matches the internal cache size for re.compile
@@ -49,19 +78,6 @@ def compile(pattern, flags=0):
     if flags & re.VERBOSE:
         raise NotJavascriptRegex("The re.VERBOSE flag has no equivalent in Javascript")
 
-    # Replace JS-only BELL escape with BELL character, and replace character class
-    # shortcuts (Unicode in Python) with the corresponding ASCII set like in JS.
-    for esc, replacement in [
-        (r"\a", "\a"),
-        (r"\d", "[0-9]"),
-        (r"\D", "[^0-9]"),
-        (r"\w", "[A-Za-z]"),
-        (r"\W", "[^A-Za-z]"),
-        (r"\s", "[ \t\n\r\x0b\x0c]"),
-        (r"\S", "[^ \t\n\r\x0b\x0c]"),
-    ]:
-        # r"(?<!\\)" is 'not preceeded by a backslash', i.e. the escape is unescaped.
-        pattern = re.sub(r"(?<!\\)" + re.escape(esc), repl=replacement, string=pattern)
     # Replace JS-only control-character escapes \cA - \cZ and \ca - \cz
     # with their corresponding control characters.
     pattern = re.sub(
@@ -69,23 +85,51 @@ def compile(pattern, flags=0):
         repl=lambda m: chr(ord(m.group(0)[-1].upper()) - 64),
         string=pattern,
     )
+    # Replace JS-only BELL escape with BELL character
+    # r"(?<!\\)" is 'not preceeded by a backslash', i.e. the escape is unescaped.
+    pattern = re.sub(r"(?<!\\)\\a", repl="\a", string=pattern)
+
     # Compile at this stage, to check for Python-only constructs *before* we add any.
     try:
         parsed = sre_parse.parse(pattern, flags=flags)
     except re.error as e:
         raise re.error("{} in pattern={!r}".format(e, pattern))
     check_features(parsed, flags=flags, pattern=pattern)
+
     # Check for comments - with `in` because don't appear in the parse tree.
     if re.search(r"\(\?\#[^)]*\)", pattern):
         raise NotJavascriptRegex(
             "'(?#comment)' groups are ignored by Python, but have no meaning in "
             "Javascript regular expressions (pattern={!r})".format(pattern)
         )
+
+    def ast_charclass_from_str(pattern):
+        subpattern = sre_parse.parse(pattern, flags=flags)
+        assert subpattern[0][0] is sre_parse.IN
+        return subpattern[0][1]
+
+    # replace character class shortcuts (Unicode in Python) with the
+    # corresponding ASCII set like in JS.
+    for target, replacements in [
+        (ast_charclass_from_str(r"\d")[0], ast_charclass_from_str("[0-9]")),
+        (ast_charclass_from_str(r"\D")[0], ast_charclass_from_str("[^0-9]")),
+        (ast_charclass_from_str(r"\w")[0], ast_charclass_from_str("[A-Za-z]")),
+        (ast_charclass_from_str(r"\W")[0], ast_charclass_from_str("[^A-Za-z]")),
+        (ast_charclass_from_str(r"\s")[0], ast_charclass_from_str("[ \t\n\r\x0b\x0c]")),
+        (ast_charclass_from_str(r"\S")[0], ast_charclass_from_str("[^ \t\n\r\x0b\x0c]")),
+    ]:
+        ast_sub_in(parsed, target, *replacements)
+
     # Replace any unescaped $ - which is allowed in both but behaves
     # differently - with the Python-only \Z which behaves like JS' $.
-    pattern = re.sub(r"(?<!\\)[$]", repl=r"\\Z", string=pattern)
+    ast_sub_el(
+        parsed,
+        sre_parse.parse(r"$", flags=flags)[0],
+        sre_parse.parse(r"\Z", flags=flags)[0],
+    )
+
     # Finally, we compile our fixed pattern to a Python regex pattern and return it.
-    return re.compile(pattern, flags=flags)
+    return sre_compile.compile(parsed, flags=flags)
 
 
 def check_features(parsed, flags, pattern):
