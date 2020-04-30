@@ -5,6 +5,7 @@ import re
 import sre_compile
 import sre_constants
 import sre_parse
+from copy import deepcopy
 from sys import version_info as python_version
 
 try:
@@ -28,12 +29,18 @@ def ast_sub_in(subpattern, target, *replacements):
     """
     in-place substitution for an IN clause member (i.e. character class)
     """
+    negation = (sre_parse.NEGATE, None)
     for i, el in enumerate(subpattern):
         if isinstance(el, tuple) and el[0] is sre_parse.IN:
             assert isinstance(subpattern, sre_parse.SubPattern)
             in_list = el[1]
             for i, el in enumerate(in_list):
                 if el == target:
+                    # TODO: can't support double-negation for now
+                    # (combining substitution of \W etc with existing ^abc
+                    # is hard)
+                    if all(negation in l for l in (in_list, replacements)):
+                        raise NotImplementedError
                     in_list.pop(i)
                     for repl in reversed(replacements):
                         in_list.insert(i, repl)
@@ -107,6 +114,13 @@ def compile(pattern, flags=0):
         subpattern = sre_parse.parse(pattern, flags=flags)
         assert subpattern[0][0] is sre_parse.IN
         return subpattern[0][1]
+
+    # constants must pass an `is` check in sre_compile
+    # but are not deepcopiable as defined
+    sre_constants._NamedIntConstant.__deepcopy__ = lambda self, memo: self
+    # needed to avoid weird interaction with python `re`
+    parsed = deepcopy(parsed)
+    del sre_constants._NamedIntConstant.__deepcopy__
 
     # replace character class shortcuts (Unicode in Python) with the
     # corresponding ASCII set like in JS.
