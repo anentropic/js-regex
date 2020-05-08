@@ -18,6 +18,7 @@ packaging==19.2           # via pytest
 pathlib2==2.3.5
 pluggy==0.13.0            # via pytest
 py==1.8.0                 # via pytest
+py-mini-racer==0.2.0
 pyparsing==2.4.2          # via packaging
 pytest-cov==2.8.1
 pytest-forked==1.1.1      # via pytest-xdist

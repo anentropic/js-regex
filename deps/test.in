@@ -1,5 +1,6 @@
 # Top-level dependencies for `tox -e test`
 hypothesis
+py-mini-racer
 pytest
 pytest-cov
 pytest-xdist
