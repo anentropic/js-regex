@@ -59,18 +59,7 @@ def ast_sub_el(subpattern, target, replacement):
             ast_sub_el(el, target, replacement)
 
 
-@lru_cache(maxsize=512)  # Matches the internal cache size for re.compile
-def compile(pattern, flags=0):
-    # type: (str, int) -> Pattern[str]
-    """Compile the given string, treated as a Javascript regex.
-
-    This aims to match all strings that would be matched in JS, and as few
-    additional strings as possible.  Where possible it will also warn if the
-    pattern would not be valid in JS.
-
-    This is not a full implementation of EMCA-standard regex, but somewhat
-    better than simply ignoring the differences between dialects.
-    """
+def _prepare_and_parse(pattern, flags=0):
     if not isinstance(pattern, (str, type(""))):
         raise TypeError("pattern={!r} must be a unicode string".format(pattern))
     if not isinstance(flags, int):
@@ -87,14 +76,15 @@ def compile(pattern, flags=0):
 
     # Replace JS-only control-character escapes \cA - \cZ and \ca - \cz
     # with their corresponding control characters.
+    # e.g. /\ca/.test('\u0001') -> true
     pattern = re.sub(
         r"(?<!\\)(\\c[A-Za-z])",
         repl=lambda m: chr(ord(m.group(0)[-1].upper()) - 64),
         string=pattern,
     )
-    # Replace JS-only BELL escape with BELL character
-    # r"(?<!\\)" is 'not preceeded by a backslash', i.e. the escape is unescaped.
-    pattern = re.sub(r"(?<!\\)\\a", repl="\a", string=pattern)
+    # # Replace JS-only BELL escape with BELL character
+    # # r"(?<!\\)" is 'not preceeded by a backslash', i.e. the escape is unescaped.
+    # pattern = re.sub(r"(?<!\\)\\a", repl="\a", string=pattern)
 
     # Compile at this stage, to check for Python-only constructs *before* we add any.
     try:
@@ -127,11 +117,24 @@ def compile(pattern, flags=0):
     for target, replacements in [
         (ast_charclass_from_str(r"\d")[0], ast_charclass_from_str("[0-9]")),
         (ast_charclass_from_str(r"\D")[0], ast_charclass_from_str("[^0-9]")),
-        (ast_charclass_from_str(r"\w")[0], ast_charclass_from_str("[A-Za-z]")),
-        (ast_charclass_from_str(r"\W")[0], ast_charclass_from_str("[^A-Za-z]")),
-        (ast_charclass_from_str(r"\s")[0], ast_charclass_from_str("[ \t\n\r\x0b\x0c]")),
-        (ast_charclass_from_str(r"\S")[0], ast_charclass_from_str("[^ \t\n\r\x0b\x0c]")),
+        (ast_charclass_from_str(r"\w")[0], ast_charclass_from_str("[A-Za-z0-9_]")),
+        (ast_charclass_from_str(r"\W")[0], ast_charclass_from_str("[^A-Za-z0-9_]")),
+        # https://developer.mozilla.org/en-US/docs/Web/JavaScript/Guide/Regular_Expressions/Character_Classes
+        # https://www.ecma-international.org/ecma-262/5.1/#sec-7.2
+        # https://www.ecma-international.org/ecma-262/5.1/#sec-7.3
+        (ast_charclass_from_str(r"\s")[0],
+         ast_charclass_from_str(
+            r"[ \f\n\r\t\v\u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000\ufeff]"
+        )),
+        (ast_charclass_from_str(r"\S")[0],
+         ast_charclass_from_str(
+            r"[^ \f\n\r\t\v\u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000\ufeff]"
+        )),
     ]:
+        # TODO: negated classes if target IN clause is already negated
+        # is [^\W] == [\w] ?
+        # (yes but gets more complicated with other chars present?)
+        # ...we can only have a single ^ in the clause
         ast_sub_in(parsed, target, *replacements)
 
     # Replace any unescaped $ - which is allowed in both but behaves
@@ -141,6 +144,22 @@ def compile(pattern, flags=0):
         sre_parse.parse(r"$", flags=flags)[0],
         sre_parse.parse(r"\Z", flags=flags)[0],
     )
+    return parsed
+
+
+@lru_cache(maxsize=512)  # Matches the internal cache size for re.compile
+def compile(pattern, flags=0):
+    # type: (str, int) -> Pattern[str]
+    """Compile the given string, treated as a Javascript regex.
+
+    This aims to match all strings that would be matched in JS, and as few
+    additional strings as possible.  Where possible it will also warn if the
+    pattern would not be valid in JS.
+
+    This is not a full implementation of EMCA-standard regex, but somewhat
+    better than simply ignoring the differences between dialects.
+    """
+    parsed = _prepare_and_parse(pattern, flags=flags)
 
     # Finally, we compile our fixed pattern to a Python regex pattern and return it.
     return sre_compile.compile(parsed, flags=flags)

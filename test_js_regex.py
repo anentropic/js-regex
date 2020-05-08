@@ -4,15 +4,35 @@
 from __future__ import unicode_literals
 
 import re
+import string
 from sys import version_info as python_version
 
 import pytest
+from hypothesis import event, example, given, note, settings, strategies as st
+from py_mini_racer import py_mini_racer
 
 import js_regex
+from js_regex._impl import _prepare_and_parse
 
 PY2 = python_version.major == 2
 SKIP_ON_PY2 = pytest.mark.skipif(PY2, reason="Not supported on Python 2")
 SKIP_BEFORE_36 = pytest.mark.skipif(python_version < (3, 6), reason="also old")
+
+
+@pytest.fixture()
+def v8context():
+    return py_mini_racer.MiniRacer()
+
+
+@pytest.fixture()
+def randexp_ctx(v8context):
+    with open("src/randexp.min.js") as f:
+        randexp_src = f.read()
+    # randexp.min.js needs this to be able to export itself
+    v8context.eval("const window = new Object()")
+    v8context.eval(randexp_src)
+    v8context.eval("const RandExp = window.RandExp")
+    return v8context
 
 
 @pytest.mark.parametrize(
@@ -42,14 +62,14 @@ def test_expected_transforms(pattern, good_match, bad_match):
         (r"\D", "߀", "1"),
         pytest.param(r"\w", "a", "é", marks=SKIP_ON_PY2),  # Latin-1 e-acute
         (r"\W", "é", "a"),
-        pytest.param(r"\s", "\t", "\xa0", marks=SKIP_ON_PY2),  # non-breaking space
-        (r"\S", "\xa0", "\t"),
+        pytest.param(r"\s", "\t", "\x1f", marks=SKIP_ON_PY2),  # non-breaking space
+        (r"\S", "\x1f", "\t"),
     ],
 )
 def test_charclass_transforms(pattern, good_match, bad_match):
     regex = js_regex.compile(pattern)
     assert regex.search(good_match)
-    assert regex.search(bad_match) is None
+    assert not regex.search(bad_match)
     if ord(bad_match) >= 128:
         # Non-ascii string is matched by Python 3, but not in JS mode
         assert re.compile(pattern).search(bad_match)
@@ -138,3 +158,108 @@ def test_pattern_validation(pattern, error):
 def test_flags_validation(flags, error):
     with pytest.raises(error):
         js_regex.compile("", flags=flags)
+
+
+def regex_patterns():
+    """Generates JS-valid regex patterns - a subset of all valid JS regex syntax,
+    but a superset of that recommended for JSON-schema:
+    https://json-schema.org/understanding-json-schema/reference/regular_expressions.html
+
+    For example, it doesn't generate inverted metachars in charsets because
+    converting [^\\W] ('not not word') is not currently supported.
+    """
+    char = st.sampled_from(
+        ["."]
+        + [re.escape(c) for c in string.printable]
+        + [r"\w", r"\s", r"\d", r"\W", r"\D", r"\S"]
+    )
+    setchars = list(string.printable) + [r"\w", r"\s", r"\d"]  # no double-negated for now
+    for c in r"\-[]":
+        setchars.remove(c)
+        setchars.append("\\" + c)
+    # for c in "\f\n\r\t\b\'\"\\":
+    #     setchars.remove(c)
+    #     setchars.append("\\" + c)
+    sets = st.builds(
+        str.format,
+        st.sampled_from(["[{}]", "[^{}]"]),
+        st.lists(st.sampled_from(setchars), min_size=1, unique=True).map("".join),
+    ).filter(lambda x: x != "[^]")
+    special = st.sampled_from([r"\c" + l for l in string.ascii_letters])
+    groups = ["(%s)", r"(?=%s)", r"(?!%s)"]  # [r"(?<=%s)", r"(?<!%s)"]
+    repeaters = ["%s?", "%s*", "%s+", "%s??", "%s*?", "%s+?"]
+    small = st.integers(0, 9).map(str)
+    num_repeat = st.one_of(
+        small,
+        small.map(lambda s: s + ","),
+        st.tuples(small, small).map(sorted).map(",".join),
+    ).map(lambda s: r"%s{" + s + r"}")
+    repeat_chars = tuple("?*+}")
+
+    def repeater(rgx, rpt):
+        if rgx.endswith(repeat_chars) and rpt.endswith(repeat_chars):
+            rgx = "(" + rgx + ")"
+        return rpt % (rgx,)
+
+    regex = st.deferred(
+        lambda: char
+        | sets
+        | special
+        | st.builds(repeater, char | sets | special, st.sampled_from(groups))
+        | st.builds(repeater, regex, st.sampled_from(["(%s)"] + repeaters) | num_repeat)
+        | st.lists(regex, min_size=2, unique=True).map("|".join)
+    )
+    return st.builds(str.format, st.sampled_from(["{}", "^{}", "{}$", "^{}$"]), regex)
+
+
+@settings(deadline=None, max_examples=1000)
+@given(regex_patterns())
+@example(pattern='\\\t')  # means: [\ or \t]
+@example(pattern='[\\n]')  # means: [\ or n]
+@example(pattern='/')
+@example(pattern='[\n]')
+def test_translates_any_pattern(randexp_ctx, pattern):
+    jr = js_regex.compile(pattern)
+    parsed = _prepare_and_parse(pattern, flags=0)
+    note(f"pattern: {pattern!r} {len(pattern)}")
+    note(f"parsed: {parsed}")
+    note(f"js-regex: {jr.pattern!r}")
+
+    for target, replacement in (
+        ("\\", "\\\\"),
+        ("\f", "\\f"),
+        ("\n", "\\n"),
+        ("\r", "\\r"),
+        ("\t", "\\t"),
+        ("\b", "\\b"),
+        ("\"", '\\"'),
+        ("'", "\\'"),
+        # ("/", r"\/"),
+    ):
+        pattern = pattern.replace(target, replacement)
+
+    randexp_ctx.eval("var pattern = \"%s\"" % pattern)
+    pattern_len = randexp_ctx.eval("pattern.length")
+    note(f"js-pattern-len: {pattern_len}")
+
+    randexp_ctx.eval("var regexp = new RegExp(pattern)")
+    randexp_ctx.eval("var randexp = new RandExp(regexp)")
+
+    for _ in range(5):
+        randexp_ctx.eval("var val = randexp.gen()")
+        match = randexp_ctx.eval("regexp.test(val)")
+        value = randexp_ctx.eval("val")
+        value_len = randexp_ctx.eval("val.length")
+        note(f"randexp: {value!r} {value_len} -> {match!r}")
+        if match:
+            assert jr.search(value)
+        else:
+            # randexp.js failed to generate a valid example
+            # e.g. https://github.com/fent/randexp.js/issues/104
+            event(f"randexp.js failed to generate a valid example for: {pattern!r}")
+
+
+@pytest.mark.parametrize("metachar", [r"\D", r"\W", r"\S"])
+def test_no_double_inverted_metachar_in_charset(metachar):
+    with pytest.raises(NotImplementedError):
+        js_regex.compile("[^%s]" % (metachar,))
