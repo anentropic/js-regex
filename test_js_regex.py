@@ -173,20 +173,17 @@ def regex_patterns():
         + [re.escape(c) for c in string.printable]
         + [r"\w", r"\s", r"\d", r"\W", r"\D", r"\S"]
     )
-    setchars = list(string.printable) + [r"\w", r"\s", r"\d"]  # no double-negated for now
+    setchars = list(string.printable) + [r"\w", r"\s", r"\d", r"\W", r"\D", r"\S"]
     for c in r"\-[]":
         setchars.remove(c)
         setchars.append("\\" + c)
-    # for c in "\f\n\r\t\b\'\"\\":
-    #     setchars.remove(c)
-    #     setchars.append("\\" + c)
     sets = st.builds(
         str.format,
         st.sampled_from(["[{}]", "[^{}]"]),
         st.lists(st.sampled_from(setchars), min_size=1, unique=True).map("".join),
     ).filter(lambda x: x != "[^]")
     special = st.sampled_from([r"\c" + l for l in string.ascii_letters])
-    groups = ["(%s)", r"(?=%s)", r"(?!%s)"]  # [r"(?<=%s)", r"(?<!%s)"]
+    groups = ["(%s)", r"(?=%s)", r"(?!%s)"]  # [r"(?<=%s)", r"(?<!%s)"]  not supported by py_mini_racer V8
     repeaters = ["%s?", "%s*", "%s+", "%s??", "%s*?", "%s+?"]
     small = st.integers(0, 9).map(str)
     num_repeat = st.one_of(
@@ -257,9 +254,3 @@ def test_translates_any_pattern(randexp_ctx, pattern):
             # randexp.js failed to generate a valid example
             # e.g. https://github.com/fent/randexp.js/issues/104
             event(f"randexp.js failed to generate a valid example for: {pattern!r}")
-
-
-@pytest.mark.parametrize("metachar", [r"\D", r"\W", r"\S"])
-def test_no_double_inverted_metachar_in_charset(metachar):
-    with pytest.raises(NotImplementedError):
-        js_regex.compile("[^%s]" % (metachar,))
