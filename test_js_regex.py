@@ -183,7 +183,11 @@ def regex_patterns():
         st.lists(st.sampled_from(setchars), min_size=1, unique=True).map("".join),
     ).filter(lambda x: x != "[^]")
     special = st.sampled_from([r"\c" + l for l in string.ascii_letters])
-    groups = ["(%s)", r"(?=%s)", r"(?!%s)"]  # [r"(?<=%s)", r"(?<!%s)"]  not supported by py_mini_racer V8
+    groups = [
+        "(%s)",
+        r"(?=%s)",
+        r"(?!%s)",
+    ]  # [r"(?<=%s)", r"(?<!%s)"]  not supported by py_mini_racer V8
     repeaters = ["%s?", "%s*", "%s+", "%s??", "%s*?", "%s+?"]
     small = st.integers(0, 9).map(str)
     num_repeat = st.one_of(
@@ -211,10 +215,10 @@ def regex_patterns():
 
 @settings(deadline=None, max_examples=1000)
 @given(regex_patterns())
-@example(pattern='\\\t')  # means: [\ or \t]
-@example(pattern='[\\n]')  # means: [\ or n]
-@example(pattern='/')
-@example(pattern='[\n]')
+@example(pattern="\\\t")  # means: [\ or \t]
+@example(pattern="[\\n]")  # means: [\ or n]
+@example(pattern="/")
+@example(pattern="[\n]")
 def test_translates_any_pattern(randexp_ctx, pattern):
     jr = js_regex.compile(pattern)
     parsed = _prepare_and_parse(pattern, flags=0)
@@ -229,13 +233,13 @@ def test_translates_any_pattern(randexp_ctx, pattern):
         ("\r", "\\r"),
         ("\t", "\\t"),
         ("\b", "\\b"),
-        ("\"", '\\"'),
+        ('"', '\\"'),
         ("'", "\\'"),
         # ("/", r"\/"),
     ):
         pattern = pattern.replace(target, replacement)
 
-    randexp_ctx.eval("var pattern = \"%s\"" % pattern)
+    randexp_ctx.eval('var pattern = "%s"' % pattern)
     pattern_len = randexp_ctx.eval("pattern.length")
     note(f"js-pattern-len: {pattern_len}")
 

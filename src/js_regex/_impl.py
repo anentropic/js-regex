@@ -108,22 +108,32 @@ def _prepare_and_parse(pattern, flags=0):
     for target, replacements in [
         # \d: [(RANGE, (48, 57))]
         (ast_charclass_from_str(r"\d")[0], ast_charclass_from_str("[0-9]")),
-        (ast_charclass_from_str(r"\D")[0], ast_charclass_from_str("[\x00-\x2f\x3a-\U0010ffff]")),
+        (
+            ast_charclass_from_str(r"\D")[0],
+            ast_charclass_from_str("[\x00-\x2f\x3a-\U0010ffff]"),
+        ),
         # \w: [(RANGE, (65, 90)), (RANGE, (97, 122)), (RANGE, (48, 57)), (LITERAL, 95)]
         (ast_charclass_from_str(r"\w")[0], ast_charclass_from_str("[A-Za-z0-9_]")),
-        (ast_charclass_from_str(r"\W")[0], ast_charclass_from_str("[\x00-\x2f\x3a-\x40\x5b-\x5e\x60\x7b-\U0010ffff]")),
+        (
+            ast_charclass_from_str(r"\W")[0],
+            ast_charclass_from_str("[\x00-\x2f\x3a-\x40\x5b-\x5e\x60\x7b-\U0010ffff]"),
+        ),
         # https://developer.mozilla.org/en-US/docs/Web/JavaScript/Guide/Regular_Expressions/Character_Classes
         # https://www.ecma-international.org/ecma-262/5.1/#sec-7.2
         # https://www.ecma-international.org/ecma-262/5.1/#sec-7.3
         # \s: [(RANGE, (9, 13)), (LITERAL, 32), < ...unicodes >]
-        (ast_charclass_from_str(r"\s")[0],
-         ast_charclass_from_str(
-            r"[ \f\n\r\t\v\u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000\ufeff]"
-        )),
-        (ast_charclass_from_str(r"\S")[0],
-         ast_charclass_from_str(
-            "[\x00-\x08\x0e-\x1f\x21-\x9f\xa1-\u167f\u1681-\u1fff\u200b-\u2027\u202a-\u202e\u2030-\u205e\u2060-\u2fff\u3001-\ufefe\uff00-\U0010ffff]"
-        )),
+        (
+            ast_charclass_from_str(r"\s")[0],
+            ast_charclass_from_str(
+                r"[ \f\n\r\t\v\u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000\ufeff]"
+            ),
+        ),
+        (
+            ast_charclass_from_str(r"\S")[0],
+            ast_charclass_from_str(
+                "[\x00-\x08\x0e-\x1f\x21-\x9f\xa1-\u167f\u1681-\u1fff\u200b-\u2027\u202a-\u202e\u2030-\u205e\u2060-\u2fff\u3001-\ufefe\uff00-\U0010ffff]"
+            ),
+        ),
     ]:
         ast_sub_in(parsed, target, *replacements)
 
