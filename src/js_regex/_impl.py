@@ -76,11 +76,8 @@ def _prepare_and_parse(pattern, flags=0):
         repl=lambda m: chr(ord(m.group(0)[-1].upper()) - 64),
         string=pattern,
     )
-    # # Replace JS-only BELL escape with BELL character
-    # # r"(?<!\\)" is 'not preceeded by a backslash', i.e. the escape is unescaped.
-    # pattern = re.sub(r"(?<!\\)\\a", repl="\a", string=pattern)
 
-    # Compile at this stage, to check for Python-only constructs *before* we add any.
+    # check for Python-only constructs *before* we transform further
     try:
         parsed = sre_parse.parse(pattern, flags=flags)
     except re.error as e:
@@ -99,10 +96,10 @@ def _prepare_and_parse(pattern, flags=0):
         assert subpattern[0][0] is sre_parse.IN
         return subpattern[0][1]
 
-    # constants must pass an `is` check in sre_compile
-    # but are not deepcopiable as defined
+    # we have to deepcopy(parsed) to avoid a weird interaction with python `re`
+    # constants must pass an `is` check in sre_compile (can't replace with int)
+    # but are not deepcopiable as defined, so we monkeypatch the cls temporarily
     sre_constants._NamedIntConstant.__deepcopy__ = lambda self, memo: self
-    # needed to avoid weird interaction with python `re`
     parsed = deepcopy(parsed)
     del sre_constants._NamedIntConstant.__deepcopy__
 
@@ -118,7 +115,7 @@ def _prepare_and_parse(pattern, flags=0):
         # https://developer.mozilla.org/en-US/docs/Web/JavaScript/Guide/Regular_Expressions/Character_Classes
         # https://www.ecma-international.org/ecma-262/5.1/#sec-7.2
         # https://www.ecma-international.org/ecma-262/5.1/#sec-7.3
-        # \s: 9-13 32 + unicodes
+        # \s: [(RANGE, (9, 13)), (LITERAL, 32), < ...unicodes >]
         (ast_charclass_from_str(r"\s")[0],
          ast_charclass_from_str(
             r"[ \f\n\r\t\v\u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000\ufeff]"
