@@ -10,7 +10,16 @@ from sys import version_info as python_version
 
 try:
     from functools import lru_cache
-    from typing import Any, Pattern  # pragma: no cover  # for Python 2
+    from typing import (
+        Any,
+        cast,
+        Iterable,
+        List,
+        Optional,
+        Pattern,
+        Tuple,
+        Union,
+    )  # pragma: no cover  # for Python 2
 except ImportError:  # pragma: no cover
 
     def lru_cache(maxsize):  # type: ignore
@@ -25,12 +34,32 @@ if python_version.major < 3:  # pragma: no cover  # Awful Python 2 compat hack.
     exec("chr = unichr")  # nosec
 
 
-def ast_sub_in(subpattern, target, *replacements):
+SubNodeT = Tuple[sre_constants._NamedIntConstant, int]
+
+ParsedCharClassT = List[SubNodeT]
+
+ParsedNodeT = Union[
+    ParsedCharClassT,
+    Tuple[None, List[sre_parse.SubPattern]],
+    Iterable[sre_parse.SubPattern],
+    Tuple[int, sre_parse.SubPattern, sre_parse.SubPattern],
+    Tuple[Optional[int], int, int, sre_parse.SubPattern],
+]
+
+SubPatternT = Union[sre_parse.SubPattern, List[sre_parse.SubPattern], SubNodeT]
+
+ElementT = Tuple[sre_constants._NamedIntConstant, ParsedNodeT]
+
+SubElementT = Union[sre_parse.SubPattern, ElementT]
+
+
+def ast_sub_in(subpattern, target, replacements):
+    # type: (SubPatternT, SubNodeT, List[SubNodeT]) -> None
     """
     in-place substitution for an IN clause member (i.e. character class)
     """
-    for i, el in enumerate(subpattern):
-        if isinstance(el, tuple) and el[0] is sre_parse.IN:
+    for i, el in enumerate(cast(Iterable, subpattern)):
+        if isinstance(el, tuple) and el[0] is sre_constants.IN:
             assert isinstance(subpattern, sre_parse.SubPattern)
             in_list = el[1]
             for i, el in enumerate(in_list):
@@ -39,21 +68,23 @@ def ast_sub_in(subpattern, target, *replacements):
                     for repl in reversed(replacements):
                         in_list.insert(i, repl)
         elif isinstance(el, (list, tuple, sre_parse.SubPattern)):
-            ast_sub_in(el, target, *replacements)
+            ast_sub_in(cast(SubPatternT, el), target, replacements)
 
 
 def ast_sub_el(subpattern, target, replacement):
+    # type: (SubPatternT, SubElementT, SubElementT) -> None
     """
     in-place substitution for a single SubPattern member
     """
-    for i, el in enumerate(subpattern):
+    for i, el in enumerate(cast(Iterable, subpattern)):
         if el == target:
-            subpattern[i] = replacement
+            cast(sre_parse.SubPattern, subpattern)[i] = cast(ElementT, replacement)
         elif isinstance(el, (list, tuple, sre_parse.SubPattern)):
-            ast_sub_el(el, target, replacement)
+            ast_sub_el(cast(SubPatternT, el), target, replacement)
 
 
 def _prepare_and_parse(pattern, flags=0):
+    # type: (str, int) -> sre_parse.SubPattern
     if not isinstance(pattern, (str, type(""))):
         raise TypeError("pattern={!r} must be a unicode string".format(pattern))
     if not isinstance(flags, int):
@@ -92,16 +123,22 @@ def _prepare_and_parse(pattern, flags=0):
         )
 
     def ast_charclass_from_str(pattern):
+        # type: (str) -> ParsedCharClassT
         subpattern = sre_parse.parse(pattern, flags=flags)
-        assert subpattern[0][0] is sre_parse.IN
-        return subpattern[0][1]
+        assert subpattern[0][0] is sre_constants.IN
+        char_class = subpattern[0][1]
+        return cast(ParsedCharClassT, char_class)
 
     # we have to deepcopy(parsed) to avoid a weird interaction with python `re`
     # constants must pass an `is` check in sre_compile (can't replace with int)
     # but are not deepcopiable as defined, so we monkeypatch the cls temporarily
-    sre_constants._NamedIntConstant.__deepcopy__ = lambda self, memo: self
+    def _monkeypatch(self, memo):
+        # type: (sre_constants._NamedIntConstant, Any) -> sre_constants._NamedIntConstant
+        return self
+
+    sre_constants._NamedIntConstant.__deepcopy__ = _monkeypatch  # type: ignore
     parsed = deepcopy(parsed)
-    del sre_constants._NamedIntConstant.__deepcopy__
+    del sre_constants._NamedIntConstant.__deepcopy__  # type: ignore
 
     # replace character class shortcuts (Unicode in Python) with the
     # corresponding ASCII set like in JS.
@@ -135,7 +172,7 @@ def _prepare_and_parse(pattern, flags=0):
             ),
         ),
     ]:
-        ast_sub_in(parsed, target, *replacements)
+        ast_sub_in(parsed, target, replacements)
 
     # Replace any unescaped $ - which is allowed in both but behaves
     # differently - with the Python-only \Z which behaves like JS' $.

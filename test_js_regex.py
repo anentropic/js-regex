@@ -222,9 +222,13 @@ def regex_patterns():
 def test_translates_any_pattern(randexp_ctx, pattern):
     jr = js_regex.compile(pattern)
     parsed = _prepare_and_parse(pattern, flags=0)
-    note(f"pattern: {pattern!r} {len(pattern)}")
-    note(f"parsed: {parsed}")
-    note(f"js-regex: {jr.pattern!r}")
+    note(
+        "pattern: {pattern!r} {pattern_len}".format(
+            pattern=pattern, pattern_len=len(pattern)
+        )
+    )
+    note("parsed: {parsed}".format(parsed=parsed))
+    note("js-regex: {jr_pattern!r}".format(jr_pattern=jr.pattern))
 
     for target, replacement in (
         ("\\", "\\\\"),
@@ -241,7 +245,7 @@ def test_translates_any_pattern(randexp_ctx, pattern):
 
     randexp_ctx.eval('var pattern = "%s"' % pattern)
     pattern_len = randexp_ctx.eval("pattern.length")
-    note(f"js-pattern-len: {pattern_len}")
+    note("js-pattern-len: {pattern_len}".format(pattern_len=pattern_len))
 
     randexp_ctx.eval("var regexp = new RegExp(pattern)")
     randexp_ctx.eval("var randexp = new RandExp(regexp)")
@@ -251,10 +255,18 @@ def test_translates_any_pattern(randexp_ctx, pattern):
         match = randexp_ctx.eval("regexp.test(val)")
         value = randexp_ctx.eval("val")
         value_len = randexp_ctx.eval("val.length")
-        note(f"randexp: {value!r} {value_len} -> {match!r}")
+        note(
+            "randexp: {value!r} {value_len} -> {match!r}".format(
+                value=value, value_len=value_len, match=match
+            )
+        )
         if match:
             assert jr.search(value)
         else:
             # randexp.js failed to generate a valid example
             # e.g. https://github.com/fent/randexp.js/issues/104
-            event(f"randexp.js failed to generate a valid example for: {pattern!r}")
+            event(
+                "randexp.js failed to generate a valid example for: {pattern!r}".format(
+                    pattern=pattern
+                )
+            )
