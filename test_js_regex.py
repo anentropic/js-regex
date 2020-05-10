@@ -239,7 +239,6 @@ def test_translates_any_pattern(randexp_ctx, pattern):
         ("\b", "\\b"),
         ('"', '\\"'),
         ("'", "\\'"),
-        # ("/", r"\/"),
     ):
         pattern = pattern.replace(target, replacement)
 

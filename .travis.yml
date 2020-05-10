@@ -4,9 +4,6 @@ install:
   - pip install --upgrade pip setuptools tox twine
 jobs:
   include:
-    - python: "2.7"
-      script:
-        - tox -e py2-test
     - python: "3.5"
       script:
         - tox -e test -- test_js_regex.py

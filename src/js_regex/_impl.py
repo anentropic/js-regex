@@ -6,33 +6,13 @@ import sre_compile
 import sre_constants
 import sre_parse
 from copy import deepcopy
+from functools import lru_cache
 from sys import version_info as python_version
-
-from typing import (
-    Any,
-    cast,
-    Iterable,
-    List,
-    Optional,
-    Pattern,
-    Tuple,
-    Union,
-)  # pragma: no cover  # for Python 2
-
-try:
-    from functools import lru_cache
-except ImportError:  # pragma: no cover
-
-    def lru_cache(maxsize):  # type: ignore
-        return lambda f: f
+from typing import Any, Iterable, List, Optional, Pattern, Tuple, Union, cast
 
 
 class NotJavascriptRegex(ValueError):
     """The pattern uses Python regex features that do not exist in Javascript."""
-
-
-if python_version.major < 3:  # pragma: no cover  # Awful Python 2 compat hack.
-    exec("chr = unichr")  # nosec
 
 
 SubNodeT = Tuple[sre_constants._NamedIntConstant, int]
@@ -54,8 +34,9 @@ ElementT = Tuple[sre_constants._NamedIntConstant, ParsedNodeT]
 SubElementT = Union[sre_parse.SubPattern, ElementT]
 
 
-def ast_sub_in(subpattern, target, replacements):
-    # type: (SubPatternT, SubNodeT, List[SubNodeT]) -> None
+def ast_sub_in(
+    subpattern: SubPatternT, target: SubNodeT, replacements: List[SubNodeT]
+) -> None:
     """
     in-place substitution for an IN clause member (i.e. character class)
     """
@@ -72,8 +53,9 @@ def ast_sub_in(subpattern, target, replacements):
             ast_sub_in(cast(SubPatternT, el), target, replacements)
 
 
-def ast_sub_el(subpattern, target, replacement):
-    # type: (SubPatternT, SubElementT, SubElementT) -> None
+def ast_sub_el(
+    subpattern: SubPatternT, target: SubElementT, replacement: SubElementT
+) -> None:
     """
     in-place substitution for a single SubPattern member
     """
@@ -84,8 +66,7 @@ def ast_sub_el(subpattern, target, replacement):
             ast_sub_el(cast(SubPatternT, el), target, replacement)
 
 
-def _prepare_and_parse(pattern, flags=0):
-    # type: (str, int) -> sre_parse.SubPattern
+def _prepare_and_parse(pattern: str, flags: int = 0) -> sre_parse.SubPattern:
     if not isinstance(pattern, (str, type(""))):
         raise TypeError("pattern={!r} must be a unicode string".format(pattern))
     if not isinstance(flags, int):
@@ -123,8 +104,7 @@ def _prepare_and_parse(pattern, flags=0):
             "Javascript regular expressions (pattern={!r})".format(pattern)
         )
 
-    def ast_charclass_from_str(pattern):
-        # type: (str) -> ParsedCharClassT
+    def ast_charclass_from_str(pattern: str) -> ParsedCharClassT:
         subpattern = sre_parse.parse(pattern, flags=flags)
         assert subpattern[0][0] is sre_constants.IN
         char_class = subpattern[0][1]
@@ -186,8 +166,7 @@ def _prepare_and_parse(pattern, flags=0):
 
 
 @lru_cache(maxsize=512)  # Matches the internal cache size for re.compile
-def compile(pattern, flags=0):
-    # type: (str, int) -> Pattern[str]
+def compile(pattern: str, flags: int = 0) -> Pattern[str]:
     """Compile the given string, treated as a Javascript regex.
 
     This aims to match all strings that would be matched in JS, and as few
@@ -203,8 +182,7 @@ def compile(pattern, flags=0):
     return sre_compile.compile(parsed, flags=flags)
 
 
-def check_features(parsed, flags, pattern):
-    # type: (Any, int, str) -> None
+def check_features(parsed: Any, flags: int, pattern: str) -> None:
     """Recursively walk through a SRE regex parse tree to check that every
     node is for a feature that also exists in Javascript regular expressions.
 
