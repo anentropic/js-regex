@@ -8,18 +8,19 @@ import sre_parse
 from copy import deepcopy
 from sys import version_info as python_version
 
+from typing import (
+    Any,
+    cast,
+    Iterable,
+    List,
+    Optional,
+    Pattern,
+    Tuple,
+    Union,
+)  # pragma: no cover  # for Python 2
+
 try:
     from functools import lru_cache
-    from typing import (
-        Any,
-        cast,
-        Iterable,
-        List,
-        Optional,
-        Pattern,
-        Tuple,
-        Union,
-    )  # pragma: no cover  # for Python 2
 except ImportError:  # pragma: no cover
 
     def lru_cache(maxsize):  # type: ignore
